@@ -678,6 +678,120 @@ class BSP_SVR(object):
             write_ply_polygon(config.sample_dir + "/" + str(t) + "_bsp.ply",
                               vertices, polygons)
 
+    def test_real_data(self, config, pic_path):
+        checkpoint_txt = os.path.join(self.checkpoint_path, "checkpoint")
+        if os.path.exists(checkpoint_txt):
+            fin = open(checkpoint_txt)
+            model_dir = fin.readline().strip()
+            fin.close()
+            self.bsp_network.load_state_dict(torch.load(model_dir))
+            print(" [*] Load SUCCESS")
+        else:
+            print(" [!] Load failed...")
+            return
+
+        w2 = self.bsp_network.generator.convex_layer_weights.detach().cpu(
+        ).numpy()
+        dima = self.test_size
+        dim = self.real_size
+        multiplier = int(dim / dima)
+        multiplier2 = multiplier * multiplier
+
+        self.bsp_network.eval()
+
+        model_float = np.ones(
+            [self.real_size, self.real_size, self.real_size, self.c_dim],
+            np.float32)
+        model_float_combined = np.ones(
+            [self.real_size, self.real_size, self.real_size], np.float32)
+
+        t = 100000
+        batch_view = None  # FIXME: Add figure here
+
+        batch_view = torch.from_numpy(batch_view)
+        batch_view = batch_view.to(self.device)
+        _, out_m, _, _ = self.bsp_network(batch_view,
+                                          None,
+                                          None,
+                                          None,
+                                          is_training=False)
+        for i in range(multiplier):
+            for j in range(multiplier):
+                for k in range(multiplier):
+                    minib = i * multiplier2 + j * multiplier + k
+                    point_coord = self.coords[minib:minib + 1]
+                    _, _, model_out, model_out_combined = self.bsp_network(
+                        None, None, out_m, point_coord, is_training=False)
+                    model_float[self.aux_x + i, self.aux_y + j, self.aux_z +
+                                k, :] = np.reshape(
+                                    model_out.detach().cpu().numpy(), [
+                                        self.test_size, self.test_size,
+                                        self.test_size, self.c_dim
+                                    ])
+                    model_float_combined[self.aux_x + i, self.aux_y +
+                                         j, self.aux_z + k] = np.reshape(
+                                             model_out_combined.detach().cpu().
+                                             numpy(), [
+                                                 self.test_size,
+                                                 self.test_size, self.test_size
+                                             ])
+
+        out_m_ = out_m.detach().cpu().numpy()
+        bsp_convex_list = []
+        model_float = model_float < 0.01
+        model_float_sum = np.sum(model_float, axis=3)
+        for i in range(self.c_dim):
+            slice_i = model_float[:, :, :, i]
+            if np.max(slice_i) > 0:  #if one voxel is inside a convex
+                #if np.min(model_float_sum-slice_i*2)>=0: #if this convex is redundant, i.e. the convex is inside the shape
+                #	model_float_sum = model_float_sum-slice_i
+                #else:
+                box = []
+                for j in range(self.p_dim):
+                    if w2[j, i] > 0.01:
+                        a = -out_m_[0, 0, j]
+                        b = -out_m_[0, 1, j]
+                        c = -out_m_[0, 2, j]
+                        d = -out_m_[0, 3, j]
+                        box.append([a, b, c, d])
+                if len(box) > 0:
+                    bsp_convex_list.append(np.array(box, np.float32))
+
+        #convert bspt to mesh
+        vertices, polygons = get_mesh(bsp_convex_list)
+        #use the following alternative to merge nearby vertices to get watertight meshes
+        #vertices, polygons = get_mesh_watertight(bsp_convex_list)
+
+        #output ply
+        write_ply_polygon(config.sample_dir + "/" + str(t) + "_bsp.ply",
+                          vertices, polygons)
+
+        #sample surface points
+        sampled_points_normals = sample_points_polygon_vox64(
+            vertices, polygons, model_float_combined, 16000)
+        #check point inside shape or not
+        point_coord = np.reshape(
+            sampled_points_normals[:, :3] +
+            sampled_points_normals[:, 3:] * 1e-4, [1, -1, 3])
+        point_coord = np.concatenate(
+            [point_coord,
+             np.ones([1, point_coord.shape[1], 1], np.float32)],
+            axis=2)
+        point_coord = torch.from_numpy(point_coord)
+        point_coord = point_coord.to(self.device)
+        _, _, _, sample_points_value = self.bsp_network(None,
+                                                        None,
+                                                        out_m,
+                                                        point_coord,
+                                                        is_training=False)
+        sample_points_value = sample_points_value.detach().cpu().numpy()
+        sampled_points_normals = sampled_points_normals[
+            sample_points_value[0, :, 0] > 1e-4]
+        print(len(bsp_convex_list), len(sampled_points_normals))
+        np.random.shuffle(sampled_points_normals)
+        write_ply_point_normal(config.sample_dir + "/" + str(t) + "_pc.ply",
+                               sampled_points_normals[:4096])
+
     #output bsp shape as ply and point cloud as ply
     def test_mesh_point(self, config):
         #load previous checkpoint
