@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import optim
 from torch.autograd import Variable
+from PIL import Image
 
 import mcubes
 from bspt import digest_bsp, get_mesh, get_mesh_watertight
@@ -678,6 +679,11 @@ class BSP_SVR(object):
             write_ply_polygon(config.sample_dir + "/" + str(t) + "_bsp.ply",
                               vertices, polygons)
 
+    def load_image(self, path):
+        img = Image.open(path).convert('L')
+        img = img.resize((137,137), Image.ANTIALIAS)
+        # FIXME: Pending...
+
     def test_real_data(self, config, pic_path):
         checkpoint_txt = os.path.join(self.checkpoint_path, "checkpoint")
         if os.path.exists(checkpoint_txt):
@@ -706,7 +712,7 @@ class BSP_SVR(object):
             [self.real_size, self.real_size, self.real_size], np.float32)
 
         t = 100000
-        batch_view = None  # FIXME: Add figure here
+        batch_view = self.load_image(pic_path)  # FIXME: Add figure here
 
         batch_view = torch.from_numpy(batch_view)
         batch_view = batch_view.to(self.device)
