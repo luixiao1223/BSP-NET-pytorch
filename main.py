@@ -60,6 +60,7 @@ elif FLAGS.svr:
 	else:
 		#bsp_svr.test_bsp(FLAGS)
 		bsp_svr.test_mesh_point(FLAGS)
+        #bsp_svr.test_real_data(FLAGS, './pic.jpg')
 		#bsp_svr.test_mesh_obj_material(FLAGS)
 else:
 	print("Please specify an operation: ae or svr?")
